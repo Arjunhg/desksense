@@ -3,6 +3,7 @@ import { queryRecentActivity } from '@/lib/screenpipe';
 import { generateInsightsFromActivity, getInsights, updateInsightStatus } from '@/lib/nebius';
 
 // GET endpoint to fetch AI insights
+// Test:    curl http://localhost:3000/api/insights -H "Content-Type: application/json"
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
@@ -45,6 +46,32 @@ export async function GET(request: NextRequest) {
 // POST endpoint to generate new insights
 export async function POST(request: NextRequest) {
   try {
+    // Check authorization
+    const authHeader = request.headers.get('authorization');
+    if (!authHeader || !process.env.API_SECRET_KEY) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'Unauthorized',
+          message: 'Missing or invalid authorization header',
+        },
+        { status: 401 }
+      );
+    }
+    
+    // Basic auth check (in production, use a more secure method)
+    const token = authHeader.replace('Bearer ', '');
+    if (token !== process.env.API_SECRET_KEY) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'Unauthorized',
+          message: 'Invalid API key',
+        },
+        { status: 401 }
+      );
+    }
+    
     const searchParams = request.nextUrl.searchParams;
     const minutes = parseInt(searchParams.get('minutes') || '15', 10);
     const insightType = searchParams.get('type') || 'recommendation';

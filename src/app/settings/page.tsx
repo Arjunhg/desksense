@@ -59,9 +59,13 @@ export default function SettingsPage() {
         throw new Error('Failed to send test notification');
       }
       
+      const data = await response.json();
+      
       setSaveMessage({
         type: 'success',
-        text: 'Test notification sent successfully!',
+        text: data.simulated
+          ? 'Test notification simulated (Screenpipe is not running)'
+          : 'Test notification sent successfully to your desktop!',
       });
     } catch (error) {
       console.error('Error sending test notification:', error);

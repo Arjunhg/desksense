@@ -27,74 +27,152 @@ const MOCK_INSIGHTS = {
 };
 
 /**
- * Send a request to Nebius AI Studio API
+ * Send a request to Nebius AI Studio API with retry logic
  */
 export async function sendToNebiusAI(request: NebiusAIRequest): Promise<NebiusAIResponse> {
-  try {
-    if (!process.env.NEBIUS_API_KEY || !process.env.NEBIUS_API_ENDPOINT) {
-      console.warn('Nebius API configuration is missing, using mock response');
-      return {
-        result: MOCK_INSIGHTS.recommendation,
-        metadata: { source: 'mock' }
-      };
-    }
-
-    const { data, options = {} } = request;
-    const { maxTokens = 2000, temperature = 0.7, model = 'meta-llama/Meta-Llama-3.1-70B-Instruct' } = options;
-
+  const MAX_RETRIES = 3;
+  let retryCount = 0;
+  
+  async function attemptRequest(): Promise<NebiusAIResponse> {
     try {
-      const response = await axios.post(
-        `${process.env.NEBIUS_API_ENDPOINT}/v1/chat/completions`,
-        {
-          model,
-          messages: [
-            {
-              role: 'system',
-              content: 'You are an AI assistant analyzing screen and audio data to provide insights and automate tasks.'
-            },
-            {
-              role: 'user',
-              content: JSON.stringify(data)
-            }
-          ],
-          max_tokens: maxTokens,
-          temperature,
-        },
-        {
-          headers: {
-            'Authorization': `Bearer ${process.env.NEBIUS_API_KEY}`,
-            'Content-Type': 'application/json',
-          },
-        }
-      );
-
-      if (!response.data) {
-        throw new Error('Empty response from Nebius API');
+      if (!process.env.NEBIUS_API_KEY || !process.env.NEBIUS_API_ENDPOINT) {
+        console.warn('Nebius API configuration is missing, using mock response');
+        return {
+          result: MOCK_INSIGHTS.recommendation,
+          metadata: { source: 'mock', reason: 'missing_api_config' }
+        };
       }
 
-      return {
-        result: response.data.choices[0].message.content,
-        metadata: response.data
-      };
-    } catch (apiError) {
-      console.error('Nebius API Error:', apiError);
-      console.log('Using mock insight response');
+      const { data, options = {} } = request;
+      const { maxTokens = 2000, temperature = 0.7, model = 'meta-llama/Meta-Llama-3.1-70B-Instruct' } = options;
+
+      try {
+        console.log(`Attempting Nebius API request (attempt ${retryCount + 1}/${MAX_RETRIES + 1})...`);
+        
+        const response = await axios.post(
+          `${process.env.NEBIUS_API_ENDPOINT}/v1/chat/completions`,
+          {
+            model,
+            messages: [
+              {
+                role: 'system',
+                content: 'You are an AI assistant analyzing screen and audio data to provide insights and automate tasks.'
+              },
+              {
+                role: 'user',
+                content: JSON.stringify(data)
+              }
+            ],
+            max_tokens: maxTokens,
+            temperature,
+          },
+          {
+            headers: {
+              'Authorization': `Bearer ${process.env.NEBIUS_API_KEY}`,
+              'Content-Type': 'application/json',
+            },
+            timeout: 30000, // 30 second timeout
+          }
+        );
+
+        if (!response.data) {
+          throw new Error('Empty response from Nebius API');
+        }
+
+        console.log('Nebius API request successful');
+        return {
+          result: response.data.choices[0].message.content,
+          metadata: response.data
+        };
+      } catch (apiError: any) {
+        // More granular error handling based on Nebius API error responses
+        let errorMessage = 'Unknown API error';
+        let errorType = 'api_error';
+        
+        if (apiError.response) {
+          // The request was made and the server responded with a status code
+          // that falls out of the range of 2xx
+          const status = apiError.response.status;
+          const errorData = apiError.response.data;
+          
+          console.error('Nebius API Error:', {
+            status,
+            data: errorData,
+            headers: apiError.response.headers
+          });
+          
+          if (status === 401) {
+            errorType = 'authentication_error';
+            errorMessage = 'Authentication failed. Please check your API key.';
+          } else if (status === 429) {
+            errorType = 'rate_limit_exceeded';
+            errorMessage = 'Rate limit exceeded. Please try again later.';
+          } else if (status === 400) {
+            errorType = 'invalid_request';
+            errorMessage = errorData.error?.message || 'Invalid request parameters';
+          } else if (status >= 500) {
+            errorType = 'server_error';
+            errorMessage = 'Nebius API server error. Please try again later.';
+          }
+        } else if (apiError.request) {
+          // The request was made but no response was received
+          errorType = 'network_error';
+          errorMessage = 'Network error. No response received from Nebius API.';
+          console.error('Network Error:', apiError.request);
+          
+          // For network errors, we can retry
+          if (retryCount < MAX_RETRIES) {
+            retryCount++;
+            console.log(`Retrying after network error (attempt ${retryCount}/${MAX_RETRIES})...`);
+            // Wait with exponential backoff: 1s, 2s, 4s...
+            await new Promise(r => setTimeout(r, 1000 * (2 ** (retryCount - 1))));
+            return attemptRequest();
+          }
+        } else {
+          // Something happened in setting up the request that triggered an Error
+          errorType = 'request_setup_error';
+          errorMessage = apiError.message || 'Error setting up the request';
+          console.error('Request Setup Error:', apiError);
+        }
+        
+        console.error(`Nebius API Error (${errorType}): ${errorMessage}`);
+        
+        if (retryCount >= MAX_RETRIES) {
+          console.log('Maximum retry attempts reached, using mock insight response');
+        } else {
+          console.log('Using mock insight response due to API error');
+        }
+        
+        // Return a mock response with error details
+        return {
+          result: MOCK_INSIGHTS.recommendation,
+          metadata: { 
+            source: 'mock', 
+            error: errorMessage,
+            errorType,
+            timestamp: new Date().toISOString(),
+            retryAttempts: retryCount
+          }
+        };
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error('Error calling Nebius AI Studio API:', errorMessage);
       
-      // Return a mock response instead of failing
+      // Return a mock response on any error
       return {
         result: MOCK_INSIGHTS.recommendation,
-        metadata: { source: 'mock', error: apiError instanceof Error ? apiError.message : String(apiError) }
+        metadata: { 
+          source: 'mock', 
+          error: errorMessage,
+          timestamp: new Date().toISOString() 
+        }
       };
     }
-  } catch (error) {
-    console.error('Error calling Nebius AI Studio API:', error);
-    
-    // Return a mock response on any error
-    return {
-      result: MOCK_INSIGHTS.recommendation,
-      metadata: { source: 'mock', error: error instanceof Error ? error.message : 'Unknown error' }
-    };
   }
+  
+  // Initial attempt
+  return attemptRequest();
 }
 
 /**

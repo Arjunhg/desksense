@@ -51,26 +51,37 @@ export default function Home() {
       // First capture new screen activity
       const captureResponse = await fetch('/api/screen-activity', {
         method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${process.env.NEXT_PUBLIC_API_SECRET_KEY || 'test-api-key-12345'}`
+        },
       });
       
       if (!captureResponse.ok) {
-        throw new Error('Failed to capture screen activity');
+        const errorData = await captureResponse.json();
+        throw new Error(errorData.message || 'Failed to capture screen activity');
       }
       
       // Then generate insights from it
       const insightResponse = await fetch('/api/insights', {
         method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${process.env.NEXT_PUBLIC_API_SECRET_KEY || 'test-api-key-12345'}`
+        },
       });
       
       if (!insightResponse.ok) {
-        throw new Error('Failed to generate insights');
+        const errorData = await insightResponse.json();
+        throw new Error(errorData.message || 'Failed to generate insights');
       }
       
       // Refresh the insights list
       const refreshResponse = await fetch('/api/insights?limit=5&status=new');
       
       if (!refreshResponse.ok) {
-        throw new Error('Failed to refresh insights');
+        const errorData = await refreshResponse.json();
+        throw new Error(errorData.message || 'Failed to refresh insights');
       }
       
       const data = await refreshResponse.json();
@@ -78,7 +89,7 @@ export default function Home() {
       setError(null);
     } catch (error) {
       console.error('Error generating insights:', error);
-      setError('Failed to generate insights. Please try again later.');
+      setError(`Failed to generate insights: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
       setIsLoading(false);
     }

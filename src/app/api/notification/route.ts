@@ -18,15 +18,14 @@ export async function POST(request: NextRequest) {
     }
     
     // Send desktop notification
-    const success = await sendNotification(title, message);
+    const result = await sendNotification(title, message);
     
-    // Even if Screenpipe is not available, we'll return success
-    // since we've modified the sendNotification function to handle this case
     return NextResponse.json({
-      success: true,
-      message: 'Notification processed successfully',
+      ...result,
       timestamp: new Date().toISOString(),
-      note: 'If Screenpipe is not running, the notification was simulated.',
+      note: result.simulated 
+        ? 'The notification was simulated because Screenpipe is not running.' 
+        : 'Notification was sent successfully to your desktop.',
     });
   } catch (error) {
     console.error('Error in notification API:', error);
@@ -35,9 +34,10 @@ export async function POST(request: NextRequest) {
     // to prevent disrupting the UI flow
     return NextResponse.json({
       success: true,
+      simulated: true,
       message: 'Notification processed (simulated)',
       timestamp: new Date().toISOString(),
       note: 'An error occurred, but notification was simulated.',
     });
   }
-} 
+}

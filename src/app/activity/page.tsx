@@ -75,12 +75,14 @@ export default function ActivityPage() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${process.env.NEXT_PUBLIC_API_SECRET_KEY || 'test-api-key-12345'}`
         },
         body: JSON.stringify({ minutes: timeRange }),
       });
       
       if (!response.ok) {
-        throw new Error('Failed to save screen activities');
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to save screen activities');
       }
       
       const data = await response.json();
